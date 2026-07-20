@@ -141,9 +141,9 @@ bh-photo-sync photos-import --album "EXACT EXISTING ALBUM NAME" --dry-run
 bh-photo-sync photos-import --album "EXACT EXISTING ALBUM NAME"
 ```
 
-CLI 使用固定版本的 `osxphotos`，跳过可能已经存在的文件，把已有资产补进目标 album，并在私有数据目录保存状态和逐文件 JSON 报告。协作式文件锁会阻止本 CLI 的并发 export/import；命令还会记录当前 Photos library，并在导入前后确认它没有变化。它不能锁住 Photos App 或其他第三方工具，也不会直接读写 Photos SQLite。如果单文件导入也报 sandbox `ENOMEM`，说明系统的 extension table 已经耗尽；应先重启 macOS，再运行上述命令。
+CLI 使用固定版本的 `osxphotos` 从 Photos SQLite 临时只读副本做指纹判重，再通过 Photos 原生 scripting API 每批导入 100 个新资产，并批量把已有资产补进目标 album。它不会写 Photos SQLite。协作式文件锁会阻止本 CLI 的并发 export/import；命令还会记录当前 Photos library，并在导入前后确认它没有变化。每批 mutation 禁止自动重放；若响应超时或中断，重新运行命令会再次按指纹扫描后安全续传。逐文件 JSON 报告写入私有数据目录。如果单文件导入也报 sandbox `ENOMEM`，说明系统的 extension table 已经耗尽；应先重启 macOS，再运行上述命令。
 
-如果用户选择 Photos 图形界面而不是 `osxphotos`，每批导入约 1,000 个文件。每批完成后彻底退出并重新打开 Photos，再从上次完成的位置继续下一批；某批失败时先重启 Photos 并重试该批。若连单文件都持续返回 sandbox `ENOMEM`，再重启 macOS。
+如果用户选择 Photos 图形界面而不是 CLI，每批导入约 1,000 个文件。每批完成后彻底退出并重新打开 Photos，再从上次完成的位置继续下一批；某批失败时先重启 Photos 并重试该批。若连单文件都持续返回 sandbox `ENOMEM`，再重启 macOS。
 
 图片转码和视频 remux 默认使用 `CPU 核数 - 2` 个 worker；发现、内容去重和最终清理由主进程完成。每个输出先写独立临时文件再原子替换，可安全重复运行。
 

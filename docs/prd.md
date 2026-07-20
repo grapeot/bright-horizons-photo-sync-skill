@@ -72,7 +72,8 @@ The primary user is a parent or guardian who controls a Bright Horizons family a
 - Offer a dry run that reports candidate, imported, skipped, and error counts without mutating Photos.
 - Skip likely duplicates and add already-existing duplicate assets to the requested album.
 - Store isolated `osxphotos` state and per-file reports under the private data directory so interrupted work can be audited and safely rerun with duplicate detection.
-- Never read or write the Photos SQLite database directly.
+- Use a temporary read-only copy of Photos SQLite for fingerprint matching; never write the Photos database directly.
+- Batch Photos mutations and disable automatic replay of mutating Apple events so an ambiguous timeout cannot duplicate a completed batch.
 
 ## Non-Goals
 

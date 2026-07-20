@@ -5,14 +5,18 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, TypeVar
 
 from .client import StorageError, SyncError
 from .locking import photos_import_lock, photos_operation_lock
 from .store import Store
 
 OSXPHOTOS_VERSION = "0.76.1"
+BATCH_SIZE = 100
+T = TypeVar("T")
 SUPPORTED_IMPORT_SUFFIXES = {".gif", ".jpeg", ".jpg", ".mov", ".mp4", ".png", ".webp"}
 DRY_RUN_SUMMARY = re.compile(
     r"Done: imported (?P<imported>\d+) file groups?, "
@@ -110,6 +114,17 @@ def _import_into_library(
     if len(matching_albums) > 1:
         raise PhotosImportError(f"Photos 中有多个同名 album {album!r}，无法安全选择")
 
+    if _get_last_photos_library() != library:
+        raise PhotosImportError("当前 Photos library 在预检期间发生变化，请重试")
+    if not dry_run:
+        return _batch_import_into_album(
+            store,
+            candidates=candidates,
+            library=library,
+            album=album,
+            export_dir=export_dir,
+        )
+
     state_dir = store.data_dir / "state/osxphotos"
     state_dir.mkdir(parents=True, exist_ok=True)
     command = [
@@ -128,18 +143,7 @@ def _import_into_library(
         "--theme",
         "plain",
     ]
-    report_path: Path | None = None
-    if dry_run:
-        command.append("--dry-run")
-    else:
-        reports_dir = store.data_dir / "reports/photos_import"
-        reports_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-        report_path = reports_dir / f"photos_import_{timestamp}.json"
-        command.extend(["--report", str(report_path)])
-
-    if _get_last_photos_library() != library:
-        raise PhotosImportError("当前 Photos library 在预检期间发生变化，请重试")
+    command.append("--dry-run")
     result = _run(
         command,
         error_context="运行 osxphotos",
@@ -147,24 +151,206 @@ def _import_into_library(
     )
     if _get_last_photos_library() != library:
         raise PhotosImportError("导入期间 Photos library 发生变化；请检查导入结果")
-    if dry_run:
-        counts = _parse_dry_run_summary(result.stdout)
-    else:
-        assert report_path is not None
-        counts = _parse_import_report(report_path, album=album)
-        if counts["errors"]:
-            raise PhotosImportError(
-                f"有 {counts['errors']} 个媒体导入失败；报告：{report_path}"
-            )
+    counts = _parse_dry_run_summary(result.stdout)
     return {
-        "mode": "dry-run" if dry_run else "import",
+        "mode": "dry-run",
         "album": album,
         "library": str(library),
         "source": str(export_dir),
         "candidates": len(candidates),
         **counts,
-        "report": str(report_path) if report_path is not None else None,
+        "report": None,
     }
+
+
+def _batch_import_into_album(
+    store: Store,
+    *,
+    candidates: list[Path],
+    library: Path,
+    album: str,
+    export_dir: Path,
+) -> dict[str, object]:
+    reports_dir = store.data_dir / "reports/photos_import"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    report_path = reports_dir / f"photos_import_{timestamp}.json"
+
+    duplicates = _find_duplicates(candidates, library)
+    missing = [path for path in candidates if not duplicates[path]]
+    album_id = _photos_album_id(album)
+    album_photo_ids = _photos_album_photo_ids(album_id)
+    duplicate_groups_to_add = [
+        matches
+        for matches in duplicates.values()
+        if matches and not album_photo_ids.intersection(matches)
+    ]
+
+    print(
+        f"Photos import: {len(missing)} new, {len(candidates) - len(missing)} duplicates",
+        file=sys.stderr,
+        flush=True,
+    )
+    _photos_add_duplicate_groups(album_id, duplicate_groups_to_add)
+    imported_by_path: dict[Path, str] = {}
+    for chunk in _chunks(missing, BATCH_SIZE):
+        imported_ids = _photos_import_batch(album_id, chunk)
+        if len(imported_ids) != len(chunk):
+            raise PhotosImportError(
+                f"Photos 仅返回 {len(imported_ids)}/{len(chunk)} 个导入结果；请重跑以安全续传"
+            )
+        imported_by_path.update(zip(chunk, imported_ids, strict=True))
+        print(
+            f"Photos import: imported {len(imported_by_path)}/{len(missing)} new assets",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    final_album_ids = _photos_album_photo_ids(album_id)
+    missing_membership = [
+        path
+        for path in candidates
+        if not final_album_ids.intersection(
+            duplicates[path] or [imported_by_path.get(path, "")]
+        )
+    ]
+    if missing_membership:
+        raise PhotosImportError(
+            f"有 {len(missing_membership)} 个媒体未加入目标 album；可安全重跑"
+        )
+    if _get_last_photos_library() != library:
+        raise PhotosImportError("导入期间 Photos library 发生变化；请检查导入结果")
+
+    duplicate_member = {
+        path: next(
+            (photo_id for photo_id in duplicates[path] if photo_id in final_album_ids),
+            None,
+        )
+        for path in candidates
+    }
+    report = [
+        {
+            "filepath": str(path),
+            "imported": path in imported_by_path,
+            "skipped": bool(duplicates[path]),
+            "error": False,
+            "duplicate_of": duplicate_member[path],
+            "albums": [album],
+        }
+        for path in candidates
+    ]
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    return {
+        "mode": "import",
+        "album": album,
+        "library": str(library),
+        "source": str(export_dir),
+        "candidates": len(candidates),
+        "imported": len(imported_by_path),
+        "errors": 0,
+        "skipped": len(candidates) - len(imported_by_path),
+        "report": str(report_path),
+    }
+
+
+def _find_duplicates(candidates: list[Path], library: Path) -> dict[Path, list[str]]:
+    try:
+        from osxphotos.fingerprintquery import FingerprintQuery
+    except ImportError as exc:
+        raise PhotosImportError("缺少 osxphotos；请安装项目的 photos extra") from exc
+
+    query = FingerprintQuery(library)
+    return {
+        path: [match[0] for match in query.possible_duplicates(path)]
+        for path in candidates
+    }
+
+
+def _photos_run_script(name: str, *args: Any, retry: bool = True) -> Any:
+    try:
+        from photoscript.script_loader import (
+            RUNSCRIPT_CONFIG,
+            configure_run_script,
+            run_script,
+        )
+
+        previous = RUNSCRIPT_CONFIG.copy()
+        if not retry:
+            configure_run_script(retry_enabled=False)
+        try:
+            return run_script(name, *args)
+        finally:
+            if not retry:
+                configure_run_script(**previous)
+    except Exception as exc:
+        raise PhotosImportError(f"Photos 批量操作失败：{exc}") from exc
+
+
+def _photos_album_id(album: str) -> str:
+    album_id = _photos_run_script("albumByName", album, False)
+    if not isinstance(album_id, str) or not album_id:
+        raise PhotosImportError(f"无法读取 Photos album {album!r}")
+    return album_id
+
+
+def _normalize_photos_id(value: str) -> str:
+    return value.split("/", 1)[0]
+
+
+def _photos_album_photo_ids(album_id: str) -> set[str]:
+    values = _photos_run_script("albumPhotes", album_id)
+    if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
+        raise PhotosImportError("Photos 返回了无效的 album asset IDs")
+    return {_normalize_photos_id(value) for value in values}
+
+
+def _photos_add_to_album(album_id: str, photo_ids: Sequence[str]) -> None:
+    values = [f"{_normalize_photos_id(value)}/L0/001" for value in photo_ids]
+    added = _photos_run_script("albumAdd", album_id, values, retry=False)
+    if not isinstance(added, list) or len(added) != len(values):
+        raise PhotosImportError("Photos 未确认全部重复资产已加入目标 album；可安全重跑")
+
+
+def _photos_add_duplicate_groups(album_id: str, groups: Sequence[Sequence[str]]) -> None:
+    if not groups:
+        return
+    primary_ids = list(dict.fromkeys(group[0] for group in groups))
+    try:
+        for chunk in _chunks(primary_ids, BATCH_SIZE):
+            _photos_add_to_album(album_id, chunk)
+        return
+    except PhotosImportError:
+        pass
+
+    for matches in groups:
+        for photo_id in matches:
+            try:
+                _photos_add_to_album(album_id, [photo_id])
+                break
+            except PhotosImportError:
+                continue
+        else:
+            raise PhotosImportError(
+                "Photos 无法将某个现有重复资产加入目标 album；可安全重跑"
+            )
+
+
+def _photos_import_batch(album_id: str, paths: Sequence[Path]) -> list[str]:
+    values = _photos_run_script(
+        "photosLibraryImportToAlbum",
+        [str(path) for path in paths],
+        album_id,
+        True,
+        retry=False,
+    )
+    if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
+        raise PhotosImportError("Photos 返回了无效的批量导入结果")
+    return [_normalize_photos_id(value) for value in values]
+
+
+def _chunks(values: Sequence[T], size: int) -> Iterator[Sequence[T]]:
+    for offset in range(0, len(values), size):
+        yield values[offset : offset + size]
 
 
 def _check_osxphotos_version() -> None:

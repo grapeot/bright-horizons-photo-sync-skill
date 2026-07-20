@@ -103,17 +103,17 @@ Workers write unique temporary files and publish with `os.replace`. Existing out
 
 ## Photos Import
 
-`photos-import` runs only on macOS and requires the pinned `osxphotos` version from the `photos` dependency extra. It does not access the Photos database directly.
+`photos-import` runs only on macOS and requires the pinned `osxphotos` version from the `photos` dependency extra. It reads a temporary, read-only copy of Photos SQLite for fingerprint matching and never writes the database directly.
 
-Before invoking `osxphotos`, the command:
+Before import, the command:
 
 1. Rejects symlinks, directories, and unsupported entries in the export directory.
 2. Resolves the last-used `.photoslibrary` and opens that exact library.
 3. Takes a machine-level import lock and confirms the selected library does not change.
 4. Requires one exact, unambiguous existing album name.
-5. Starts the subprocess with an allowlisted environment so Bright Horizons credentials are not inherited.
+5. Starts osxphotos subprocesses with an allowlisted environment so Bright Horizons credentials are not inherited.
 
-Dry-run mode parses the `osxphotos` summary and returns counts without requesting mutation. Import mode enables duplicate skipping and duplicate-to-album assignment, writes isolated state under `data/state/osxphotos/`, and stores a timestamped JSON report. The command fails if the report contains an error or any non-error item is absent from the requested album.
+Dry-run mode parses the `osxphotos` summary and returns counts without requesting mutation. Import mode fingerprints all candidates, bulk-adds existing matching asset IDs to the album, and sends missing files to Photos in batches of 100. Mutating Apple events disable Photoscript's outer timeout retry; after an ambiguous response or interruption, the user reruns the command and a fresh fingerprint scan determines the remaining work. The command stores a timestamped JSON report and fails unless every candidate resolves to an asset ID in the requested album.
 
 Large Finder drag-and-drop operations can exhaust macOS sandbox extensions. The CLI avoids that pasteboard path. If even a single scripted import returns sandbox `ENOMEM`, the system-level extension table may already be exhausted and macOS must be restarted before retrying.
 
