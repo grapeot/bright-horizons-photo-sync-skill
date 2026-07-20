@@ -24,7 +24,7 @@
 - Photos 导出合并规范库和 Legacy；图片统一 JPEG+标准 ExifIFD，视频写 creation time，并跳过重复内容。
 - 规范 JPEG 样本必须通过 ExifTool `Validate: OK`，防止标签落入错误 IFD 后被 Photos 静默拒绝。
 - Photos 转码/remux 支持多进程，worker 默认是 CPU 核数减二，单 worker 路径用于确定性离线测试。
-- `photos-import` 覆盖 macOS 门控、album 名称校验、命令构造、第三方进程环境隔离、dry-run 摘要和逐文件 JSON 报告。
+- `photos-import` 覆盖 macOS 门控、album 名称校验、第三方进程环境隔离、dry-run 摘要、原生批量导入、重复资产 album 修复、mutation 禁止自动重放和逐文件 JSON 报告。
 - 认证失败不重试且不推进水位。
 - 已完成媒体重复同步时不再次下载。
 
@@ -43,7 +43,7 @@
 
 只有设置 `BH_ENABLE_PHOTOS_LIVE_TESTS=1` 才运行 `photos_live` marker。该测试只读取当前 Photos library 和 album 列表，不导入、移动或删除资产。
 
-Photos mutation 不放进自动 pytest。手工验收必须指定一个现有 album，先运行 dry-run，再执行导入并核对 JSON 报告。
+Photos mutation 不放进自动 pytest。手工验收必须指定一个现有 album，先运行 dry-run，再执行导入并核对 JSON 报告；第二次正式运行必须返回 `imported: 0`，且目标 album asset 数与候选数一致。
 
 当前离线测试没有模拟 file-lock contention，也没有自动修改或统计 Photos library。并发拒绝、目标 library 稳定性和 mutation 后资产数量属于手工 E2E 验收。
 

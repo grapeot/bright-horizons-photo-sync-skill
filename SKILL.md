@@ -1,6 +1,6 @@
 ---
 name: bright-horizons-photo-sync
-description: Back up all My Bright Day events and media visible to an authorized Bright Horizons family account, resume interrupted downloads, verify local files, and prepare a macOS Photos import.
+description: Back up all My Bright Day events and media visible to an authorized Bright Horizons family account, resume interrupted downloads, verify local files, and import them into a macOS Photos album without duplicates.
 ---
 
 # Bright Horizons Photo Sync
@@ -15,6 +15,8 @@ Use this skill when a user wants a local backup of My Bright Day photos, videos,
 - `download` reaches zero pending or failed attachments, or reports the exact unresolved failure.
 - `verify --deep` reports `ok: True` before the backup is declared complete.
 - If requested, `photos-export` creates a reproducible import directory with the correct IANA timezone.
+- `photos-import --dry-run` reports the exact new/duplicate split before mutation.
+- A completed `photos-import` leaves every exported candidate in the named album and a second run imports zero new assets.
 
 ## Boundaries
 
@@ -57,14 +59,17 @@ For macOS Photos:
 bh-photo-sync photos-export
 ```
 
-Do not drag thousands of individual files from Finder into Photos. The pasteboard grants one sandbox extension per file and can exhaust the kernel extension table, producing `Cannot allocate memory` followed by `Operation not permitted`. Photos users should provide the exact name of an existing album. Albums reference assets in the main Library; they do not provide separate storage.
+Do not drag thousands of individual files from Finder into Photos. The pasteboard grants one sandbox extension per file and can exhaust the kernel extension table, producing `Cannot allocate memory` followed by `Operation not permitted`. Use the duplicate-safe CLI workflow and provide the exact name of an existing album. Albums reference assets in the main Library; they do not provide separate storage.
 
 ```bash
+# Audit without changing Photos.
 bh-photo-sync photos-import --album "EXACT EXISTING ALBUM NAME" --dry-run
+
+# Import missing assets and add existing duplicates to the album.
 bh-photo-sync photos-import --album "EXACT EXISTING ALBUM NAME"
 ```
 
-The command rejects a missing or ambiguous album, serializes this CLI's Photos operations with advisory file locks, snapshots the selected Photos library and verifies it remains selected, skips likely duplicates, adds existing duplicate assets to the requested album, keeps state under the private data directory, and writes a per-file report. It cannot lock out the Photos App or unrelated third-party tools, and it never accesses the Photos database directly.
+The apply command reads a temporary copy of the Photos database to fingerprint every candidate, imports only missing assets in native batches, and bulk-adds existing duplicates to the album. It rejects a missing or ambiguous album, serializes this CLI's Photos operations with advisory file locks, verifies that the selected library does not change, and writes a per-file report. It is safe to rerun after interruption. Do not replace it with raw `osxphotos import`: osxphotos imports one asset per Apple event and can take hours. Do not add `--resume`; osxphotos may skip the duplicate-album repair required by this workflow.
 
 If even a one-file scripted import fails with sandbox `ENOMEM`, quitting Photos is insufficient because the system-level extension table is already exhausted. Restart macOS once, then retry the CLI workflow instead of returning to drag-and-drop.
 
@@ -73,3 +78,9 @@ If the user prefers the Photos GUI, import about 1,000 files per batch. After ea
 ## Reporting
 
 Report the requested range, event and attachment totals, pending/failed counts, deep verification result, and Photos export path/count when applicable. Never include authentication headers or raw event payloads.
+
+## Repository workflow
+
+This project is maintained only through the public `grapeot/bright-horizons-photo-sync-skill` repository. Do not fetch from, push to, merge from, or open PRs against a private repository.
+
+Keep the main checkout on public `master`. For code or documentation changes, create a separate worktree from `origin/master` on a temporary `feat/*` branch, verify there, push that branch to public `origin`, and merge a public PR into protected `master`. Delete the temporary remote branch after merge. If a local hook permits only `master -> master`, it conflicts with branch protection and must be updated to permit temporary public `feat/*` PR branches while continuing to block direct pushes to `master` and all private-named branches.
