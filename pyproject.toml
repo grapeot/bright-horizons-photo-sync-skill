@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bright-horizons-photo-sync"
+version = "0.1.0"
+description = "Complete, incremental My Bright Day event and media backups"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "Pillow>=11,<13",
+  "python-dotenv>=1.1,<2",
+  "requests>=2.32,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4,<9",
+  "ruff>=0.12,<1",
+]
+
+[project.scripts]
+bh-photo-sync = "bright_horizons_photo_sync.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bright_horizons_photo_sync"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+markers = [
+  "live: opt-in tests that call the real Bright Horizons service",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

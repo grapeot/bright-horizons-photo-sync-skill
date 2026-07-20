@@ -1,0 +1,21 @@
+.env
+.env.*
+!.env.example
+.venv/
+.claude/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# 私有家庭数据必须位于 repo 外；这些规则防止迁移前误提交。
+photos/
+raw_data/
+data/
+merged_events.json
+events_summary.csv
+apis.txt
+.DS_Store
