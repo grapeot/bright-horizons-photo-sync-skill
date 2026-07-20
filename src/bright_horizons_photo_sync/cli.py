@@ -10,6 +10,7 @@ from pathlib import Path
 from .client import MyBrightDayClient, SyncError
 from .config import Config, ConfigError, load_environment, resolve_data_dir, resolve_timezone
 from .media import build_photos_export, fix_formats, sync_media
+from .photos import PhotosImportError, import_photos
 from .ranges import DEFAULT_TIMEZONE, TimeRange, epoch_to_date, parse_date_range, today_until
 from .store import Store
 from .sync import run_sync
@@ -50,6 +51,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     photos_parser.add_argument(
         "--timezone", help=f"EXIF 使用的 IANA 时区（默认 {DEFAULT_TIMEZONE}）"
+    )
+    photos_import_parser = subparsers.add_parser(
+        "photos-import", help="将 Photos 导出目录导入指定的现有 album"
+    )
+    photos_import_parser.add_argument("--album", required=True, help="现有 Photos album 的精确名称")
+    photos_import_parser.add_argument(
+        "--dry-run", action="store_true", help="只检查待导入和重复数量，不修改 Photos"
     )
     return parser
 
@@ -139,11 +147,16 @@ def main(argv: list[str] | None = None) -> None:
                 _emit(
                     build_photos_export(store, timezone=resolve_timezone(args.timezone)), args.json
                 )
+            elif args.command == "photos-import":
+                _emit(import_photos(store, album=args.album, dry_run=args.dry_run), args.json)
         finally:
             store.close()
     except ConfigError as exc:
         print(f"配置错误：{exc}", file=sys.stderr)
         raise SystemExit(2) from exc
+    except PhotosImportError as exc:
+        print(f"Photos 导入失败：{exc}", file=sys.stderr)
+        raise SystemExit(exc.exit_code) from exc
     except SyncError as exc:
         print(f"同步失败：{exc}", file=sys.stderr)
         raise SystemExit(exc.exit_code) from exc
