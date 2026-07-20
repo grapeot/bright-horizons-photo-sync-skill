@@ -1,25 +1,28 @@
-# Working Log
+# 开发日志
 
 ## Changelog
 
 ### 2026-07-20
 
-- Published the local-first event and media backup CLI with a clean public history.
-- Removed local child classification and filtering; API member fields remain metadata only.
-- Added SQLite v3 migration, complete-range discovery, restartable downloads, format repair, deep verification, and deterministic exports.
-- Added Photos-compatible JPEG and video export with timestamps, deduplication, parallel processing, and operation locking.
-- Added macOS `photos-import` with exact existing-album validation, selected-library checks, dry-run counts, duplicate handling, isolated state, and per-file reports.
-- Restored the public project scaffold: `AGENTS.md`, PRD, RFC, test strategy, and this working log.
-- Replaced osxphotos' one-file-at-a-time apply path with duplicate-safe native Photos batches while retaining exact album membership verification and restartability.
-- Validated the scaffold with Ruff and an isolated test `HOME`: 58 passed and 2 opt-in tests skipped. The isolation kept mocked Photos tests from contending with a real import lock.
-- Scanned public files for credentials, personal names, account IDs, private paths, obsolete child-filter settings, and household-specific counts; no matches remained.
+- 发布了本地优先的事件与媒体备份 CLI，并清理了公开的历史提交记录。
+- 移除了本地的孩子分类与过滤逻辑；API 中的 `member` 字段仅作为元数据保留。
+- 实现了 SQLite v3 数据库迁移、完整区间数据发现、支持断点续传的下载器、格式自动修复、媒体深度校验以及确定性的衍生导出。
+- 实现了与 macOS 照片库兼容的 JPEG 图片和视频导出功能，支持写入标准拍摄时间戳、去重、多进程并行处理以及导出锁定。
+- 实现了 macOS 专用的 `photos-import` 导入命令，支持精确相册校验、所选照片库一致性检测、dry-run 数量统计、重复项处理、隔离运行状态以及生成逐文件报告。
+- 恢复了公开项目的文档骨架：`AGENTS.md`、`docs/prd.md`、`docs/rfc.md`、`docs/test.md` 以及本开发日志。
+- 将 `osxphotos` 默认的单文件处理路径替换为重复安全的 Photos 原生批量处理队列，同时保留了精确的相册成员校验和可中断续传的能力。
+- 发布版本当时在隔离的 `HOME` 环境下通过 Ruff 和离线测试：58 项通过，2 项需显式启用的测试跳过。隔离环境防止模拟 Photos 测试与本机真实导入锁争用。
+- 扫描了公开跟踪的文件，核实已清除凭证、个人姓名、账号 ID、私有绝对路径、过时的孩子过滤器配置以及家庭特定的运行统计数据。
+- 使用 Antigravity 重写并审校全部公开文档，将唯一的 Agent Skill 从根目录迁到 `skills/bright_horizons_photo_sync.md`，同时更新安装说明和交叉引用。
+- 本轮文档调整通过 Ruff 和隔离 `HOME` 的离线测试：61 项通过，2 项需显式启用的测试跳过。
+- 本轮隐私扫描未发现本机绝对路径、不可移植链接、凭据引用、邮箱、私钥模式或私有 remote 名称。
 
 ## Lessons Learned
 
-- A successful HTTP response does not prove a wide event range is complete. Responses at the API limit must be split until every leaf range is below the limit.
-- The service MIME value is only a hint. File signatures determine the canonical extension.
-- Photos accepts decodable files and timestamp metadata under different rules. Exported JPEGs need standard ExifIFD fields and validation, not just a timestamp written somewhere in the file.
-- Dragging thousands of Finder URLs into Photos can exhaust sandbox extensions. Use the resumable import command; restart macOS if a one-file import still returns sandbox `ENOMEM`.
-- Photoscript retries timed-out Apple events by default. Disable that outer retry for mutations; recover by rerunning the fingerprint scan instead of replaying an ambiguous batch.
-- A dependent ID establishes the browser session but does not bound returned events. Save all API-visible events and never infer ownership from member metadata.
-- Public documentation must describe reproducible contracts, not household counts, names, dates, local paths, or private operational history.
+- 成功的 HTTP 响应并不能证明大跨度的事件范围是完整的。对于达到单页请求上限的 API 响应，必须持续拆分为更小的子区间，直到每个叶子区间的响应都低于限制，方可确认数据无遗漏。
+- 服务端返回的 MIME 类型值不可尽信。必须通过检测文件的二进制特征码来决定其规范的文件扩展名。
+- macOS 照片库对可解码文件和拍摄时间戳元数据有严格的接纳规则。导出的 JPEG 图片需要写入标准 ExifIFD 属性并进行有效性校验，而不仅仅是在文件某处标注一个时间戳。
+- 批量向 Photos 库拖入数千个 Finder 文件会导致系统沙盒 Extension 资源耗尽。必须使用支持断点续传的 CLI 导入命令；若单文件导入依然触发沙盒 `ENOMEM` 报错，需要重启 macOS 解决。
+- `photoscript` 默认会重试超时的 Apple Event 事件。针对写入和导入等变更动作，应当关闭外部重试机制；遇到中断时，应通过重新扫描指纹来恢复并续传，而不能盲目重投可能处于歧义状态的批量数据。
+- `dependent_id` 虽然能建立浏览器家长会话，但并不框定 API 返回的数据边界。应该保存所有可见事件，决不能凭 `member` 字段擅自推断所有权。
+- 公开的文档应该着眼于描述可重复执行的功能契约，禁止包含任何具体的家庭统计数据、姓名、日期、本地绝对路径或私有运行日志。
