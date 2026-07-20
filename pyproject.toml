@@ -19,6 +19,9 @@ dev = [
   "pytest>=8.4,<9",
   "ruff>=0.12,<1",
 ]
+photos = [
+  "osxphotos==0.76.1; sys_platform == 'darwin'",
+]
 
 [project.scripts]
 bh-photo-sync = "bright_horizons_photo_sync.cli:main"
@@ -31,6 +34,7 @@ addopts = "-ra"
 testpaths = ["tests"]
 markers = [
   "live: opt-in tests that call the real Bright Horizons service",
+  "photos_live: opt-in read-only tests against the local macOS Photos library",
 ]
 
 [tool.ruff]

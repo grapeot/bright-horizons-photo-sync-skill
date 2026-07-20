@@ -40,3 +40,7 @@ def test_operational_subcommands_are_available() -> None:
     assert parser.parse_args(["download"]).command == "download"
     assert parser.parse_args(["fix-formats"]).command == "fix-formats"
     assert parser.parse_args(["photos-export"]).command == "photos-export"
+    args = parser.parse_args(["photos-import", "--album", "BrightHoizons"])
+    assert args.command == "photos-import"
+    assert args.album == "BrightHoizons"
+    assert args.dry_run is False

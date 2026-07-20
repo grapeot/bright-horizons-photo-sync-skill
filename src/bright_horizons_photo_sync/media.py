@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from PIL import Image
 
 from .client import AuthenticationError, IntegrityError, MyBrightDayClient, StorageError, SyncError
+from .locking import photos_operation_lock
 from .store import Store
 
 CONTENT_EXTENSIONS = {
@@ -55,6 +56,13 @@ def sync_media(client: MyBrightDayClient, store: Store) -> tuple[int, int]:
 
 
 def build_photos_export(
+    store: Store, *, workers: int | None = None, timezone: str = "America/Los_Angeles"
+) -> dict[str, int | str]:
+    with photos_operation_lock(store.data_dir):
+        return _build_photos_export(store, workers=workers, timezone=timezone)
+
+
+def _build_photos_export(
     store: Store, *, workers: int | None = None, timezone: str = "America/Los_Angeles"
 ) -> dict[str, int | str]:
     photos_timezone = ZoneInfo(timezone)
