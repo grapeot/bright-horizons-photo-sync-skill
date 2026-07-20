@@ -4,11 +4,22 @@
 
 ## 安装
 
+核心同步支持 macOS 和其他提供 `fcntl` 的 Unix-like 系统。`photos-import` 只支持 macOS，Windows 当前不受支持。
+
 ```bash
 uv venv .venv
 source .venv/bin/activate
+
+# 只运行核心备份
+uv pip install -e .
+
+# 开发和离线测试
 uv pip install -e '.[dev]'
-# photos-export 使用 ExifTool 写标准 EXIF，并用 ffmpeg 无损写视频 creation_time
+
+# macOS Photos import
+uv pip install -e '.[photos]'
+
+# photos-export 使用 ExifTool 写 EXIF，并用 ffmpeg 写视频 creation_time
 brew install exiftool ffmpeg
 ```
 
@@ -32,10 +43,15 @@ cp .env.example .env
 4. 打开浏览器 DevTools 的 Network，切换 My Bright Day 月份或 Memories，让页面发出 `/remote/v1/events` 请求。
 5. 选择一个返回 `200` 的事件请求，使用 `Copy as cURL`，从中提取完整 `Cookie` header 和 `X-TADPOLES-UID`。
 6. 把 Cookie 值写入本地 `.env` 的 `BH_SESSION_COOKIE`；把 UID 写入 `BH_TADPOLES_UID`。浏览器地址或请求 Referer 中的 `dependent_id` 写入 `BH_DEPENDENT_ID`。
-7. 先执行短窗口验证：
+7. 用临时数据目录执行短窗口验证，避免测试水位写入正式 archive：
 
 ```bash
-bh-photo-sync sync --since 2025-01-01 --until 2025-01-02 --events-only
+SMOKE_DIR="$(mktemp -d)"
+trap 'rm -rf "$SMOKE_DIR"' EXIT
+bh-photo-sync --data-dir "$SMOKE_DIR" discover \
+  --since YYYY-MM-DD --until YYYY-MM-DD
+rm -rf "$SMOKE_DIR"
+trap - EXIT
 ```
 
 如果 CLI 返回 `401` 或 `403`，说明 cookie 不完整、已经过期，或复制的不是成功的 My Bright Day API 请求。重新走上述流程，不要把 Family Information Center 的 `access_token`、JWT redirect URL 或 cookie 提交到 Git。
@@ -48,7 +64,7 @@ bh-photo-sync sync --since 2025-01-01 --until 2025-01-02 --events-only
 
 ```bash
 # 1. 发现事件和 attachment ID，不下载媒体
-bh-photo-sync discover --since 2024-01-01 --until 2025-01-01
+bh-photo-sync discover --since YYYY-MM-DD --until YYYY-MM-DD
 
 # 2. 断点续传 pending/failed 附件
 bh-photo-sync download
@@ -62,13 +78,13 @@ bh-photo-sync fix-formats
 显式同步半开日期区间 `[since, until)`：
 
 ```bash
-bh-photo-sync sync --since 2024-08-01 --until 2025-01-01
+bh-photo-sync sync --since YYYY-MM-DD --until YYYY-MM-DD
 ```
 
-首次全历史 backfill 可以从已知入园历史之前开始，例如：
+首次全历史 backfill 应从已知入园历史之前开始：
 
 ```bash
-bh-photo-sync sync --since 2023-01-01 --until 2025-01-01
+bh-photo-sync sync --since YYYY-MM-DD --until YYYY-MM-DD
 ```
 
 不传日期时，CLI 从上次成功水位回看 14 天并同步到今天结束。这种重叠运行会捕捉迟到或近期修改的事件，同时按稳定 ID 避免重复保存：
@@ -113,23 +129,19 @@ bh-photo-sync photos-export
 
 不要把数千个文件从 Finder 拖进 Photos。拖放会通过 pasteboard 为每个文件分配 sandbox extension；数量较大时，Photos 日志会出现 `Failed to consume sandbox extension ... Cannot allocate memory`，随后所有文件都以 `Operation not permitted` 失败。普通 RAM、磁盘空间、Unix 权限和文件描述符并不是这个错误的根因。
 
-推荐用 `osxphotos` 做可恢复导入，并把所有资产放进 `Bright Horizons` album。Photos 的 album 只是 Library 中资产的引用，因此资产仍会出现在 Library；下面的命令保证它们同时归入指定 album。先 dry-run：
+Photos 用户可以用项目 CLI 做可恢复导入。Photos 的 album 只是 Library 中资产的引用，因此资产仍会出现在 Library。命令要求目标 album 已经存在且名称精确匹配，先运行 dry-run：
 
 ```bash
-uvx --python 3.12 osxphotos import data/exports/photos_import_all \
-  --walk --skip-dups --dup-albums --album "Bright Horizons" \
-  --dry-run --no-progress
+bh-photo-sync photos-import --album "EXACT EXISTING ALBUM NAME" --dry-run
 ```
 
 确认数量后执行导入：
 
 ```bash
-uvx --python 3.12 osxphotos import data/exports/photos_import_all \
-  --walk --skip-dups --dup-albums --album "Bright Horizons" \
-  --resume --stop-on-error 3
+bh-photo-sync photos-import --album "EXACT EXISTING ALBUM NAME"
 ```
 
-`--skip-dups` 按 Photos fingerprint 跳过已经存在的文件，`--dup-albums` 把已存在的资产补进目标 album，`--resume` 使用 `~/.local/share/osxphotos/osxphotos_import.db` 继续中断的运行。如果单文件 AppleScript 导入也报 sandbox `ENOMEM`，说明当前系统的 extension table 已经耗尽；仅重启 Photos 不足以恢复，应先重启 macOS，再运行上述命令。以后避免逐文件拖放，手工导入时通过 `File > Import` 选择包含目录本身，让系统授予一个递归目录 scope。
+CLI 使用固定版本的 `osxphotos`，跳过可能已经存在的文件，把已有资产补进目标 album，并在私有数据目录保存状态和逐文件 JSON 报告。协作式文件锁会阻止本 CLI 的并发 export/import；命令还会记录当前 Photos library，并在导入前后确认它没有变化。它不能锁住 Photos App 或其他第三方工具，也不会直接读写 Photos SQLite。如果单文件导入也报 sandbox `ENOMEM`，说明系统的 extension table 已经耗尽；应先重启 macOS，再运行上述命令。
 
 如果用户选择 Photos 图形界面而不是 `osxphotos`，每批导入约 1,000 个文件。每批完成后彻底退出并重新打开 Photos，再从上次完成的位置继续下一批；某批失败时先重启 Photos 并重试该批。若连单文件都持续返回 sandbox `ENOMEM`，再重启 macOS。
 
@@ -156,8 +168,10 @@ bh-photo-sync export
 
 ```bash
 source .venv/bin/activate
-python -m pytest -q
 ruff check .
+TEST_HOME="$(mktemp -d)"
+HOME="$TEST_HOME" python -m pytest -q
+rm -rf "$TEST_HOME"
 ```
 
 真实 API 测试必须显式启用：
@@ -167,3 +181,9 @@ BH_ENABLE_LIVE_TESTS=1 python -m pytest -q -m live
 ```
 
 完整测试策略见 [`docs/test.md`](docs/test.md)。
+
+产品需求、架构和开发记录见 [`docs/prd.md`](docs/prd.md)、[`docs/rfc.md`](docs/rfc.md) 和 [`docs/working.md`](docs/working.md)。
+
+## 安装为 Agent Skill
+
+把本仓库 URL 交给 Codex、Claude Code、Cursor、OpenCode 或其他 coding agent，并要求它安装根目录的 `SKILL.md`。Agent 应先读取目标 workspace 的 `AGENTS.md`、`CLAUDE.md` 或路由文件，再把这个 root skill 加入现有 skill index；没有 index 时，在 workspace 入口文档中增加一个简短指针。不要把 `.env` 或 `data/` 复制进 skill 目录。

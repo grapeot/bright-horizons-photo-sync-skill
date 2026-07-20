@@ -22,8 +22,9 @@
 - 每个成功事件窗口原子写入完整 response cache。
 - 全部可见事件和 API member metadata 进入数据库；attachment 状态可独立查询，不提供按孩子过滤。
 - Photos 导出合并规范库和 Legacy；图片统一 JPEG+标准 ExifIFD，视频写 creation time，并跳过重复内容。
-- 每个测试 JPEG 必须通过 ExifTool `Validate: OK`，防止标签落入错误 IFD 后被 Photos 静默拒绝。
+- 规范 JPEG 样本必须通过 ExifTool `Validate: OK`，防止标签落入错误 IFD 后被 Photos 静默拒绝。
 - Photos 转码/remux 支持多进程，worker 默认是 CPU 核数减二，单 worker 路径用于确定性离线测试。
+- `photos-import` 覆盖 macOS 门控、album 名称校验、命令构造、第三方进程环境隔离、dry-run 摘要和逐文件 JSON 报告。
 - 认证失败不重试且不推进水位。
 - 已完成媒体重复同步时不再次下载。
 
@@ -35,26 +36,41 @@
 
 - 认证有效。
 - 响应是 JSON 且顶层包含 `events`。
-- 每个事件时间位于请求范围内或明确记录 API 的边界异常。
-- 最多下载一个附件并验证类型、大小与 SHA-256。
+- 返回值是事件对象列表。
+- 若窗口内存在附件，最多读取一个附件，验证允许的 content type 和非空数据块。
+
+## Photos live 测试
+
+只有设置 `BH_ENABLE_PHOTOS_LIVE_TESTS=1` 才运行 `photos_live` marker。该测试只读取当前 Photos library 和 album 列表，不导入、移动或删除资产。
+
+Photos mutation 不放进自动 pytest。手工验收必须指定一个现有 album，先运行 dry-run，再执行导入并核对 JSON 报告。
+
+当前离线测试没有模拟 file-lock contention，也没有自动修改或统计 Photos library。并发拒绝、目标 library 稳定性和 mutation 后资产数量属于手工 E2E 验收。
 
 ## E2E 验收
 
 首次正式 backfill 不在默认 pytest 内执行。完成标准：
 
-1. `discover --since 2024-01-01 --until <明天>` 返回 0，数据库 attachment 集合与 cache 一致。
+1. 对用户指定的完整历史范围运行 `discover`，数据库 attachment 集合与 cache 一致。
 2. `status` 显示成功水位等于目标 `until`。
 3. `verify --deep` 无缺失、零字节或 hash 不一致。
 4. `download` 完成后再次运行时新增下载数为 0。
 5. `fix-formats` 后 `verify --deep` 通过，第二次格式修复为 0 变更。
 6. `photos-export` 的 JPEG EXIF 和视频 creation time 与来源时间一致，且不包含 PDF/空文件。
-7. 导出的事件最大日期达到本次目标日期范围内的最新服务端事件。
+7. `photos-import --album <exact-name> --dry-run` 返回候选、待导入、跳过和错误数量，且不修改 Photos。
+8. 正式 `photos-import` 的报告错误数为 0；每个非错误项进入指定 album，重复运行不增加重复资产。
+9. 导出的事件最大日期达到本次目标日期范围内的最新服务端事件。
 
 ## 运行命令
 
 ```bash
 source .venv/bin/activate
-python -m pytest -q
 ruff check .
+TEST_HOME="$(mktemp -d)"
+HOME="$TEST_HOME" python -m pytest -q
+rm -rf "$TEST_HOME"
 BH_ENABLE_LIVE_TESTS=1 python -m pytest -q -m live
+BH_ENABLE_PHOTOS_LIVE_TESTS=1 python -m pytest -q -m photos_live
 ```
+
+默认套件使用临时 `HOME`，避免测试用的 machine-level Photos lock 与正在运行的真实导入互相干扰。Photos live 测试必须恢复真实 `HOME` 才能读取当前 library。

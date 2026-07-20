@@ -38,7 +38,7 @@ If browser tooling can inspect network requests, it may help identify the succes
 
 ## Operating guidance
 
-Install with a project virtual environment and `uv pip install -e '.[dev]'`. ExifTool and ffmpeg are required only for `photos-export`.
+Install core backup dependencies with `uv pip install -e .`. Use `uv pip install -e '.[dev]'` for development and `uv pip install -e '.[photos]'` for macOS Photos import. The `photos` extra pins the tested `osxphotos` integration; ExifTool and ffmpeg are external requirements for `photos-export`. The CLI requires a Unix-like platform with `fcntl`; `photos-import` requires macOS.
 
 Prefer separate, restartable stages:
 
@@ -49,7 +49,7 @@ bh-photo-sync fix-formats
 bh-photo-sync verify --deep
 ```
 
-Use a short one-day `discover` window first to validate authentication. For the full run, choose `--since` before the earliest expected enrollment date and `--until` after the latest desired day. Dates use `BH_TIMEZONE` unless overridden with `--timezone`.
+Use a short one-day `discover` window with a disposable `--data-dir` to validate authentication without advancing the real archive watermark. For the full run, choose `--since` before the earliest expected enrollment date and `--until` after the latest desired day. Dates use `BH_TIMEZONE` unless overridden with `--timezone`.
 
 For macOS Photos:
 
@@ -57,21 +57,16 @@ For macOS Photos:
 bh-photo-sync photos-export
 ```
 
-Do not drag thousands of individual files from Finder into Photos. The pasteboard grants one sandbox extension per file and can exhaust the kernel extension table, producing `Cannot allocate memory` followed by `Operation not permitted`. Use a directory-scoped `File > Import` operation or the resumable CLI workflow below. Photos albums reference assets in the main Library; they do not provide separate storage.
+Do not drag thousands of individual files from Finder into Photos. The pasteboard grants one sandbox extension per file and can exhaust the kernel extension table, producing `Cannot allocate memory` followed by `Operation not permitted`. Photos users should provide the exact name of an existing album. Albums reference assets in the main Library; they do not provide separate storage.
 
 ```bash
-# Audit what would be imported without changing Photos.
-uvx --python 3.12 osxphotos import data/exports/photos_import_all \
-  --walk --skip-dups --dup-albums --album "Bright Horizons" \
-  --dry-run --no-progress
-
-# Import missing files and add both new and existing duplicates to the album.
-uvx --python 3.12 osxphotos import data/exports/photos_import_all \
-  --walk --skip-dups --dup-albums --album "Bright Horizons" \
-  --resume --stop-on-error 3
+bh-photo-sync photos-import --album "EXACT EXISTING ALBUM NAME" --dry-run
+bh-photo-sync photos-import --album "EXACT EXISTING ALBUM NAME"
 ```
 
-If even a one-file scripted import fails with sandbox `ENOMEM`, quitting Photos is insufficient because the system-level extension table is already exhausted. Restart macOS once, then use the CLI workflow instead of returning to drag-and-drop.
+The command rejects a missing or ambiguous album, serializes this CLI's Photos operations with advisory file locks, snapshots the selected Photos library and verifies it remains selected, skips likely duplicates, adds existing duplicate assets to the requested album, keeps state under the private data directory, and writes a per-file report. It cannot lock out the Photos App or unrelated third-party tools, and it never accesses the Photos database directly.
+
+If even a one-file scripted import fails with sandbox `ENOMEM`, quitting Photos is insufficient because the system-level extension table is already exhausted. Restart macOS once, then retry the CLI workflow instead of returning to drag-and-drop.
 
 If the user prefers the Photos GUI, import about 1,000 files per batch. After each completed batch, quit Photos completely, reopen it, and continue from the last completed position. Retry a failed batch after restarting Photos; restart macOS only if even a one-file import continues to return sandbox `ENOMEM`.
 
