@@ -111,7 +111,27 @@ bh-photo-sync photos-export
 
 `data/exports/photos_import_all/` 是一个扁平、可重建的导出目录。所有图片统一转为标准 RGB JPEG；规范对象使用数据库最早 event time 写入 EXIF，Legacy 图片沿用原 `DateTimeOriginal`。视频不转码，只用 ffmpeg 无损写入 QuickTime creation time；Legacy 视频没有内部时间时使用日期文件名对应当天中午。PDF、空文件和内容重复项不进入导出。可以在 Mac Photos 中用 `File > Import` 选择整个目录。可用 `BH_TIMEZONE` 或 `photos-export --timezone Asia/Shanghai` 指定 EXIF 时区。
 
-Apple Photos 不适合一次选择数千个文件：它通常先导入几百或上千张，随后可能耗尽 sandbox file access 或崩溃。建议每批约 1,000 个文件；每批完成后彻底退出 Photos，重新打开，再从上次完成的位置继续下一批。某批失败时重启 Photos 并重试该批，不要因此重新生成已经验证通过的媒体。
+不要把数千个文件从 Finder 拖进 Photos。拖放会通过 pasteboard 为每个文件分配 sandbox extension；数量较大时，Photos 日志会出现 `Failed to consume sandbox extension ... Cannot allocate memory`，随后所有文件都以 `Operation not permitted` 失败。普通 RAM、磁盘空间、Unix 权限和文件描述符并不是这个错误的根因。
+
+推荐用 `osxphotos` 做可恢复导入，并把所有资产放进 `Bright Horizons` album。Photos 的 album 只是 Library 中资产的引用，因此资产仍会出现在 Library；下面的命令保证它们同时归入指定 album。先 dry-run：
+
+```bash
+uvx --python 3.12 osxphotos import data/exports/photos_import_all \
+  --walk --skip-dups --dup-albums --album "Bright Horizons" \
+  --dry-run --no-progress
+```
+
+确认数量后执行导入：
+
+```bash
+uvx --python 3.12 osxphotos import data/exports/photos_import_all \
+  --walk --skip-dups --dup-albums --album "Bright Horizons" \
+  --resume --stop-on-error 3
+```
+
+`--skip-dups` 按 Photos fingerprint 跳过已经存在的文件，`--dup-albums` 把已存在的资产补进目标 album，`--resume` 使用 `~/.local/share/osxphotos/osxphotos_import.db` 继续中断的运行。如果单文件 AppleScript 导入也报 sandbox `ENOMEM`，说明当前系统的 extension table 已经耗尽；仅重启 Photos 不足以恢复，应先重启 macOS，再运行上述命令。以后避免逐文件拖放，手工导入时通过 `File > Import` 选择包含目录本身，让系统授予一个递归目录 scope。
+
+如果用户选择 Photos 图形界面而不是 `osxphotos`，每批导入约 1,000 个文件。每批完成后彻底退出并重新打开 Photos，再从上次完成的位置继续下一批；某批失败时先重启 Photos 并重试该批。若连单文件都持续返回 sandbox `ENOMEM`，再重启 macOS。
 
 图片转码和视频 remux 默认使用 `CPU 核数 - 2` 个 worker；发现、内容去重和最终清理由主进程完成。每个输出先写独立临时文件再原子替换，可安全重复运行。
 

@@ -57,7 +57,23 @@ For macOS Photos:
 bh-photo-sync photos-export
 ```
 
-Import `data/exports/photos_import_all/` through Photos `File > Import`. Do not select a very large library in one operation: Photos may import the first several hundred or thousand items and then exhaust its sandbox file access or crash. Import about 1,000 items per batch. After each batch finishes, quit Photos completely, reopen it, and continue with the next batch from the last completed position. If a batch fails, restart Photos and retry that batch; do not rebuild valid media solely for this Photos-side error.
+Do not drag thousands of individual files from Finder into Photos. The pasteboard grants one sandbox extension per file and can exhaust the kernel extension table, producing `Cannot allocate memory` followed by `Operation not permitted`. Use a directory-scoped `File > Import` operation or the resumable CLI workflow below. Photos albums reference assets in the main Library; they do not provide separate storage.
+
+```bash
+# Audit what would be imported without changing Photos.
+uvx --python 3.12 osxphotos import data/exports/photos_import_all \
+  --walk --skip-dups --dup-albums --album "Bright Horizons" \
+  --dry-run --no-progress
+
+# Import missing files and add both new and existing duplicates to the album.
+uvx --python 3.12 osxphotos import data/exports/photos_import_all \
+  --walk --skip-dups --dup-albums --album "Bright Horizons" \
+  --resume --stop-on-error 3
+```
+
+If even a one-file scripted import fails with sandbox `ENOMEM`, quitting Photos is insufficient because the system-level extension table is already exhausted. Restart macOS once, then use the CLI workflow instead of returning to drag-and-drop.
+
+If the user prefers the Photos GUI, import about 1,000 files per batch. After each completed batch, quit Photos completely, reopen it, and continue from the last completed position. Retry a failed batch after restarting Photos; restart macOS only if even a one-file import continues to return sandbox `ENOMEM`.
 
 ## Reporting
 
