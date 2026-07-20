@@ -1,97 +1,98 @@
-# PRD: Bright Horizons Photo Sync
+# PRD: Bright Horizons 照片增量备份
 
-## Problem
+## 问题背景
 
-My Bright Day lets a parent view and save family media, but it does not provide a complete, verifiable bulk backup workflow. Manual downloads are difficult to resume and cannot prove that a large date range avoided API truncation, duplicate files, or partial writes.
+My Bright Day 允许家长查看并保存家庭媒体文件，但未提供完整且可验证的批量备份工作流。手动下载不仅难以在中断后恢复，也无法验证是否因 API 限制导致截断、文件重复或部分写入。
 
-This project provides a local-first CLI and agent skill. It discovers all events visible to an authenticated family account, stores their original metadata, downloads each attachment once, verifies local integrity, and prepares media for macOS Photos.
+本项目提供了一个本地优先的 CLI 命令行工具与智能体技能。该工具能自动发现已认证家庭账号可见的所有事件，留存原始元数据，确保每个附件仅下载一次，校验本地完整性，并为导入 macOS 照片库做准备。
 
-The project is unofficial and is not affiliated with or endorsed by Bright Horizons.
+> [!NOTE]
+> 本项目为非官方工具，与 Bright Horizons 无任何隶属或认可关系。
 
-## Users
+## 目标用户
 
-The primary user is a parent or guardian who controls a Bright Horizons family account and wants a local archive of data that account can access. A coding agent may guide installation and operation, but the user completes login, password, and MFA interactions in a visible browser.
+主要用户是控制 Bright Horizons 家庭账号、并希望在本地备份该账号可访问数据的家长或监护人。Coding agent 可辅助安装和日常运行，但登录、输入密码和 MFA 必须由用户在可见的浏览器中亲自完成。
 
-## Product Principles
+## 产品原则
 
-- **Complete before convenient.** A run succeeds only after the requested date range has been fully covered.
-- **Local by default.** Credentials, raw responses, databases, media, reports, and Photos state remain on the user's machine.
-- **Visible means in scope.** The backup saves every event returned to the authenticated account. API member metadata does not define ownership or filter downloads.
-- **Restartable stages.** Discovery, download, format repair, verification, Photos export, and Photos import can run independently.
-- **Derived exports do not replace originals.** Downloaded objects remain unchanged; Photos-compatible media lives in a rebuildable export directory.
+- **先求完整，再求便利**：只有当请求的日期区间被完全同步且无遗漏时，同步运行才被视为成功。
+- **本地优先**：凭证、原始响应、数据库、媒体文件、导入报告和 Photos 状态均保留在用户本地机器上。
+- **可见即可保存**：备份范围包含已认证账号可见的所有事件。API 返回的 `member` 元数据不定义所有权，也不用于过滤下载。
+- **阶段可独立运行**：发现（Discovery）、下载（Download）、格式修复（Format Repair）、哈希校验（Verification）、Photos 导出与 Photos 导入均支持独立重跑。
+- **导出与原始媒体隔离**：下载的原始对象保持不变；Photos 兼容的媒体存储在可重新构建的导出目录中。
 
-## Functional Requirements
+## 功能需求
 
-### Authentication
+### 身份认证
 
-- Read the My Bright Day session cookie, Tadpoles UID, and dependent ID from a local environment file.
-- Never ask the user to paste credentials into an AI conversation, issue, commit, or command output.
-- Treat `401`, `403`, HTML login responses, and malformed authentication responses as hard failures.
-- Do not automate password or MFA entry and do not bypass service authorization.
+- 从本地的环境变量文件中读取 My Bright Day 会话 Cookie、Tadpoles UID 和 Dependent ID。
+- 严禁要求用户将凭证粘贴到 AI 会话、GitHub Issue、Commit 或命令行输出中。
+- 遇到 `401`、`403`、HTML 登录响应或格式错误的身份认证响应时，立即视为硬性失败。
+- 不提供自动输入密码或自动完成 MFA 的功能，亦不绕过服务授权。
 
-### Discovery and Synchronization
+### 发现与同步
 
-- Accept explicit half-open date ranges `[since, until)` using a configurable IANA timezone.
-- After the first successful run, support incremental synchronization with a configurable overlap window.
-- Split API requests until the client can prove that no response-limit truncation remains.
-- Save each successful event response to a local atomic cache before publishing the run as complete.
-- Upsert events by stable event key and preserve their original payloads and API member metadata.
-- Deduplicate attachments by attachment ID while preserving many-to-many event relationships.
-- Never advance the success watermark after authentication, network, integrity, truncation, or storage failures.
+- 接受使用 IANA 时区配置的半开日期区间 `[since, until)`。
+- 在首次成功运行后，支持带有可配置重叠窗口（默认为 14 天）的增量同步。
+- 若 API 单次响应达到限制上限，自动拆分并二分请求区间，直到可以证明响应无截断遗漏。
+- 在判定运行成功并完成发布前，必须将每次成功的事件响应写入本地原子缓存。
+- 通过稳定的事件 key 执行 upsert，保留原始 payload 以及 API 中的 `member` 元数据。
+- 通过附件 ID 对附件进行去重，同时保留多对多的事件与附件关联。
+- 若遇到认证、网络、数据校验、截断或存储失败，严禁推进成功同步水位。
 
-### Media Storage and Verification
+### 媒体存储与校验
 
-- Download through the attachment metadata endpoint and validate the returned HTTPS signed URL.
-- Stream each attachment to a temporary file, reject empty or unsupported content, compute SHA-256, fsync, and atomically publish the object.
-- Determine media type from file signatures rather than trusting the server MIME value.
-- Resume `pending` and `failed` attachments without redownloading valid complete objects.
-- Detect missing or size-mismatched complete objects and return them to the pending queue.
-- Provide shallow and deep verification; deep verification recalculates every stored SHA-256.
+- 通过附件元数据接口获取并验证返回的 HTTPS signed URL。
+- 以流式方式将附件写入临时 `.part` 文件，拒绝空文件或不支持的内容，计算 SHA-256，调用 fsync 确保落盘，最后原子发布为正式文件。
+- 根据文件签名判定媒体类型，不依赖服务器返回的 MIME 类型。
+- 增量续传 `pending` 和 `failed` 状态的附件，不重复下载已完整且验证通过的文件。
+- 检测本地缺失或大小不匹配的已完成对象，并将其退回 `pending` 队列。
+- 提供快速校验和深度校验；深度校验将重新计算本地所有文件的 SHA-256 并与数据库对比。
 
-### Query and Export
+### 查询与导出
 
-- Report event, attachment, run, watermark, and attachment-status totals without exposing credentials.
-- Query attachments by storage status and MIME prefix.
-- Rebuild JSON and CSV exports from SQLite.
-- Expose SQLite views for attachment summaries and attachment-event context.
+- 提供事件、附件、同步历史、当前水位和附件状态的汇总统计，且不泄露凭证。
+- 支持按存储状态和 MIME 前缀查询附件。
+- 支持从 SQLite 数据库重新构建 JSON 和 CSV 文件导出。
+- 提供直观的 SQLite 视图以展示附件统计与附件-事件关联上下文。
 
-### Photos Export
+### Photos 导出
 
-- Build a flat, reproducible Photos import directory from complete images and videos plus any explicitly retained legacy media.
-- Convert images to RGB JPEG and write standard EXIF capture timestamps in the configured timezone.
-- Preserve video streams while writing creation time metadata.
-- Exclude PDFs, empty files, unsupported files, and duplicate content.
-- Run conversion in parallel while publishing each output atomically.
-- Serialize Photos export and import operations so they cannot modify shared derived state concurrently.
+- 从完成下载的媒体库与指定的 Legacy 归档中，合并生成一个扁平、可重建的导出目录。
+- 将图片解码并保存为高品质 RGB JPEG，在 EXIF 中写入配置时区的标准拍摄时间戳（DateTimeOriginal）。
+- 保持视频流不转码，仅写入 QuickTime 拍摄时间元数据。
+- 剔除 PDF、空文件、不支持的文件以及内容重复的项。
+- 支持多进程并行导出转换，导出写入临时文件后原子替换。
+- 在项目内通过文件锁序列化 Photos 导出和导入操作，防止并发冲突。
 
-### Photos Import
+### Photos 导入
 
-- Support macOS only and use the pinned `osxphotos` integration.
-- Require the exact name of an existing Photos album; reject missing or ambiguous names.
-- Resolve and open the selected Photos library, serialize this CLI's imports with advisory locks, and verify the selected library has not changed during the operation.
-- Offer a dry run that reports candidate, imported, skipped, and error counts without mutating Photos.
-- Skip likely duplicates and add already-existing duplicate assets to the requested album.
-- Store isolated `osxphotos` state and per-file reports under the private data directory so interrupted work can be audited and safely rerun with duplicate detection.
-- Use a temporary read-only copy of Photos SQLite for fingerprint matching; never write the Photos database directly.
-- Batch Photos mutations and disable automatic replay of mutating Apple events so an ambiguous timeout cannot duplicate a completed batch.
+- 仅支持 macOS 系统，并使用指定版本的 `osxphotos` 库。
+- 导入时必须指定一个已存在的 Photos 相册名；若相册不存在或名称有歧义，拒绝导入。
+- 解析并打开当前使用的照片库（`.photoslibrary`），使用机器级导入锁序列化导入过程，并确认所选照片库在运行中未被更改。
+- 提供 `dry-run` 模式，在不修改 Photos 库的前提下预报待导入、跳过、重复和错误文件的统计。
+- 自动跳过重复资产，并将已存在的重复媒体批量追加到指定的相册中。
+- 在私有数据目录下存储独立的 `osxphotos` 状态与逐文件 JSON 报告，确保中断后能被审计且安全重跑。
+- 仅读取 Photos 数据库的只读临时副本进行指纹匹配，绝对不直接修改或写入 Photos 数据库。
+- 采用 100 个文件为一个批次的批量提交，并禁用 Apple Event 的自动重放，避免响应超时后重复提交已经完成的批次。
 
-## Non-Goals
+## 非目标
 
-- Running a hosted service, multi-tenant backend, or shared credential store.
-- Inferring which person owns an event or attachment.
-- Filtering synchronization by child name, member ID, classroom, or local labels.
-- Detecting or propagating server-side deletions.
-- Uploading, publishing, editing, or deleting the user's source media.
-- Automating login, password entry, MFA, or access-control bypass.
-- Managing arbitrary Photos libraries, albums, or destructive Photos operations.
+- 提供托管服务、多租户后台或云端共享凭证库。
+- 自行推断或分类事件、附件的所有人。
+- 根据孩子姓名、成员 ID、班级或本地标签对同步数据进行过滤。
+- 检测或同步服务端的物理删除。
+- 自动上传、发布、修改或删除用户持有的原始媒体。
+- 自动化密码输入、MFA 验证或绕过访问控制。
+- 管理非当前默认的任意 Photos 库、相册，或执行 Photos 库的破坏性操作。
 
-## Success Criteria
+## 成功标准
 
-- Repeating the same completed range does not redownload valid media.
-- A full-page API response is split until completeness can be established or the run fails explicitly.
-- Interrupted downloads never appear as complete objects.
-- `verify --deep` reports no missing files or hash mismatches for a healthy archive.
-- Photos export is reproducible and records valid capture times without changing source objects.
-- Photos import dry-run makes no Photos changes; a successful import writes a report with zero errors and adds every non-error item to the exact requested album.
-- Default tests run offline and never mutate Bright Horizons or Photos.
-- The public repository contains no credentials, family data, private paths, raw payloads, or household-specific operational statistics.
+- 在相同时间区间内重复同步时，不重新下载已完成且有效的文件。
+- 遇到大返回量的 API 响应时，能自动二分拆分，直到确定数据完整或显式报错失败。
+- 中断的下载绝对不能以完整文件的形式留在目标目录中。
+- 在数据无损的归档中，`verify --deep` 报告无缺失、零字节或哈希不匹配文件。
+- Photos 导出结果是可重现的，且 EXIF 拍摄时间正确，不修改原始文件字节。
+- Photos 导入的 dry-run 不引起 Photos 库任何变化；正式导入时报告错误数为 0，且所有候选媒体最终成功添加至指定相册。
+- 默认测试完全离线，不与真实的 Bright Horizons 或 macOS Photos 交互。
+- 公开的仓库中不存在任何真实家庭数据、私有绝对路径、API 负载明文以及账号特定的运行统计。
