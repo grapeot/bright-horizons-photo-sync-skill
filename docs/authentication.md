@@ -29,7 +29,19 @@ GET /remote/v1/obj_attachment
 
 `childid` 对应本地配置中的 `BH_DEPENDENT_ID`，只用于构造请求 Referer 和初始化家长 session，不代表 API 的数据边界。成功请求可能返回多个 member 的事件，也可能返回没有 member 的共享事件。同步器保存全部可见事件及其 `member` 元数据，不据此过滤或判断照片所有权。
 
-## Cookie 获取步骤
+## Cookie 获取流程（受信浏览器辅助，优先）
+
+存在受信本地浏览器自动化环境时，优先使用本流程，家长全程不需要打开 DevTools 或复制任何内容：
+
+1. 用专用 user-data-dir 启动附带远程调试端口的可见 Chrome，打开 [Family Information Center](https://familyinfocenter.brighthorizons.com/)，由家长本人在窗口内完成登录与 MFA。端口与 profile 路径属本地配置，不入公开文档。
+2. 家长从孩子卡片进入 My Bright Day（`…/dashboard/parents.html?dependent_id=…`）。两个易错点：该页面空闲态不会发出 `/remote/v1/events` 请求；也不要直接导航 `mybrightday.brighthorizons.com` 根路径，会落到仅接受员工凭证的登录入口。对已打开的页面刷新一次即可稳定触发。
+3. 不嗅探请求头（自动化客户端看不到这些请求的 Cookie 头）。通过浏览器的 cookie 读取接口获取 `mybrightday.brighthorizons.com` 域的 cookie，其中 `session` 承载家长会话；将其按域拼接后写入 `BH_SESSION_COOKIE`，`dependent_id` 从页面 URL 读取后写入 `BH_DEPENDENT_ID`。
+4. `BH_TADPOLES_UID` 为账号级固定标识，不随会话过期：`.env` 已有旧值时直接复用。Cookie 会话有效期的经验值约为 3 个月，过期后按本流程重取。
+5. 全程不得把 cookie 值、JWT 链接或 `access_token` 打印到会话、日志或公共文档中，只写入本地 `.env`。
+
+## Cookie 获取步骤（手动回退）
+
+以下 DevTools 手动流程在没有任何受信浏览器自动化环境时使用：
 
 1. 打开 [Family Information Center](https://familyinfocenter.brighthorizons.com/)，登录家长账号，点击孩子卡片进入 My Bright Day 页面。
 2. 按下 `F12` 打开浏览器开发者工具（DevTools），切换到 `Network` 面板，然后在网页上点击切换月份或查看 Memories 以触发接口请求。

@@ -38,14 +38,14 @@ cp .env.example .env
 
 ## Cookie 失效恢复指南
 
-当登录会话过期时，请勿从旧的 `mybrightday.brighthorizons.com` 登录页开始，因为该页面可能会引导家长进入只接受员工凭证的认证入口。请按照以下步骤重新获取 Cookie：
+当登录会话过期时，请勿从旧的 `mybrightday.brighthorizons.com` 登录页开始，因为该页面可能会引导家长进入只接受员工凭证的认证入口。优先采用受信浏览器辅助提取：用专用 profile 启动带远程调试端口的可见 Chrome，由家长本人完成登录与 MFA，agent 被动读取浏览器 cookie jar 中 My Bright Day 域的会话 cookie 写入 `.env`，细节见 [`docs/authentication.md`](docs/authentication.md)。以下手动步骤作为回退：
 
 1. 在浏览器中打开当前的家长入口：[Family Information Center](https://familyinfocenter.brighthorizons.com/)。
 2. 点击 `Log In`，使用家长账号完成登录。
 3. 在首页的孩子卡片中，点击进入 My Bright Day。此时浏览器会先请求 `mbdwgateway.brighthorizons.com/api/account/mbdtoken`，然后通过一次性的 JWT 重定向到 `mybrightday.brighthorizons.com`。
 4. 按 `F12` 打开浏览器 DevTools 的 `Network` 面板，然后在网页中切换月份或查看 Memories，使页面触发 `/remote/v1/events` 请求。
 5. 找到返回状态码为 `200` 的事件请求，右键选择 `Copy as cURL`，并从中提取出完整的 `Cookie` 头部内容以及 `X-TADPOLES-UID` 的值。
-6. 将 Cookie 的值写入本地 `.env` 的 `BH_SESSION_COOKIE` 中，将 UID 的值写入 `BH_TADPOLES_UID` 中。将浏览器地址栏或请求 Referer 中携带的 `dependent_id` 写入 `BH_DEPENDENT_ID` 中。
+6. 将 Cookie 的值写入本地 `.env` 的 `BH_SESSION_COOKIE` 中，将 UID 的值写入 `BH_TADPOLES_UID` 中。将浏览器地址栏或请求 Referer 中携带的 `dependent_id` 写入 `BH_DEPENDENT_ID` 中。注意 `BH_TADPOLES_UID` 是账号级固定标识，不会过期：`.env` 已有旧值时可以只更新 Cookie。Cookie 会话的经验有效期约为 3 个月。
 7. 在使用新的 Cookie 之前，可以使用临时目录执行短时间窗口的冒烟测试，避免不确定的测试数据写入正式备份中：
 
 ```bash

@@ -29,14 +29,29 @@ description: 增量备份已授权 Bright Horizons 家庭账号可见的 My Brig
 
 ## 身份认证
 
-支持的 V0 版提取流程为本地交互式：
+认证提取为本地交互式流程：V1（受信浏览器辅助提取）优先，受信浏览器环境不可用时回退 V0（手动 DevTools）。两条路径都不得绕过登录、MFA 或访问控制，凭证只进本地 `.env`。
+
+### V1：受信浏览器辅助提取
+
+1. 用专用 user-data-dir 启动附带 CDP 远程调试端口的可见 Chrome（端口应避开本机已占用的调试端口；profile 路径与端口属本地运行配置，不写入公开文档），打开 `https://familyinfocenter.brighthorizons.com/`，并由用户本人在窗口内完成登录与 MFA。
+2. Agent 只做被动监听，不代填凭证、不替用户点击登录。家长登录后从孩子卡片进入 My Bright Day，地址形如 `…/dashboard/parents.html?dependent_id=…`，`BH_DEPENDENT_ID` 可直接读取该 URL 获得。
+3. 两个易错点：`dashboard/parents.html` 处于空闲态时不会发出 `/remote/v1/events` 请求；且不要让浏览器直接导航 `mybrightday.brighthorizons.com` 根路径，该入口会落到仅接受员工凭证的登录页。稳定的触发方式是对已打开的 My Bright Day 页面做一次刷新，或等待页面自身的网络活动。
+4. 不依赖抓包请求头：`/legacy/parents/params` 等请求在自动化客户端侧不暴露 Cookie 头。直接用 CDP 的 cookie 读取接口取 `mybrightday.brighthorizons.com` 域的 cookie（其中的 `session` 承载会话），按该域拼接成 Cookie 头写入 `BH_SESSION_COOKIE`。
+5. `BH_TADPOLES_UID` 是账号级固定标识，不随会话过期；`.env` 已有旧值时直接复用。Cookie 会话有效期的经验值约为 3 个月。
+6. 写入后确认 `.env` 权限为 600 且已被 Git 忽略。
+
+### V0：手动 DevTools 提取（回退）
 
 1. 引导用户打开 `https://familyinfocenter.brighthorizons.com/`，登录家长账号，并从孩子卡片点击进入 My Bright Day。
-2. 打开浏览器的开发者工具（DevTools）Network 面板，触发月份或 Memories 加载，选择一个返回 200 的 `/remote/v1/events` 请求。
-3. 让用户将该请求的完整 `Cookie` 头部、`X-TADPOLES-UID` 和 Referer 中携带的 `dependent_id` 填入本地的 `.env` 配置文件（参考 `.env.example`）。
+2. 打开 DevTools 的 Network 面板，触发月份或 Memories 加载，选择一个返回 200 的 `/remote/v1/events` 请求。
+3. 将该请求的完整 `Cookie` 头部、`X-TADPOLES-UID` 与 Referer 中携带的 `dependent_id` 填入本地 `.env` 配置文件（参考 `.env.example`）。
 4. 在本地终端执行 `chmod 600 .env` 以限制读取权限，并核实该文件已被 Git 忽略。
 
-如果本地有受信任的自动化浏览器环境，可辅助识别该请求，但严禁打印或向外发送任何敏感凭证。如果无法进行受信任的本地提取，必须退回到上述手动提取流程。
+## 增量与去重语义
+
+- `discover` 报告的 `attachment_count` 是区间内事件的附件引用数。同一媒体对象会在多个事件间复用，数据库按附件 ID 去重，因此 `download` 实际新增下载量通常远小于 `attachment_count`；`downloaded` 与 `failed` 同时为 0 即队列已清空，不代表区间数据缺失。
+- `download` 幂等：中断后重跑即可续传，水位线只在区间完整覆盖时推进。
+- `photos-import` 幂等：导入完成后再次运行（或 dry-run）应返回 0 个新导入。目标相册名必须与 Photos 库中现有相册精确匹配，不要顺手「纠正」既有相册名的拼写。
 
 ## 运行指导
 
