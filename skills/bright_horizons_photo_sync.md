@@ -29,7 +29,7 @@ description: 增量备份已授权 Bright Horizons 家庭账号可见的 My Brig
 
 ## 身份认证
 
-认证提取为本地交互式流程：V1（受信浏览器辅助提取）优先，受信浏览器环境不可用时回退 V0（手动 DevTools）。两条路径都不得绕过登录、MFA 或访问控制，凭证只进本地 `.env`。
+认证提取为本地交互式流程：V1（受信浏览器辅助提取）优先，受信浏览器环境不可用时回退 V0（手动 DevTools）。两条路径都不得绕过登录、MFA 或访问控制，凭证只进本地 `.env`。V1 适用于已完成首次配置、需要刷新会话的场景；首次获取 `BH_TADPOLES_UID` 仍走 V0。
 
 ### V1：受信浏览器辅助提取
 
@@ -49,7 +49,8 @@ description: 增量备份已授权 Bright Horizons 家庭账号可见的 My Brig
 
 ## 增量与去重语义
 
-- `discover` 报告的 `attachment_count` 是区间内事件的附件引用数。同一媒体对象会在多个事件间复用，数据库按附件 ID 去重，因此 `download` 实际新增下载量通常远小于 `attachment_count`；`downloaded` 与 `failed` 同时为 0 即队列已清空，不代表区间数据缺失。
+- `discover` 报告的 `attachment_count` 是发现完成后数据库范围内已去重的附件对象总数，不是本次区间的附件引用数。区间事件的附件引用可能指向既有对象、跨事件复用对象或 legacy 库中已迁移的对象，因此 `download` 实际新增下载量通常远小于该计数。
+- 完成度的准绳是：`download` 结束后再重跑一次，`downloaded` 与 `failed` 均为 0 即队列已清空，并以 `verify --deep` 通过为最终验收。注意 `downloaded` 是本轮成功下载量，不是剩余队列长度，不要用它判断完成。
 - `download` 幂等：中断后重跑即可续传，水位线只在区间完整覆盖时推进。
 - `photos-import` 幂等：导入完成后再次运行（或 dry-run）应返回 0 个新导入。目标相册名必须与 Photos 库中现有相册精确匹配，不要顺手「纠正」既有相册名的拼写。
 

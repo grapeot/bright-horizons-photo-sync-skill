@@ -31,7 +31,7 @@ GET /remote/v1/obj_attachment
 
 ## Cookie 获取流程（受信浏览器辅助，优先）
 
-存在受信本地浏览器自动化环境时，优先使用本流程，家长全程不需要打开 DevTools 或复制任何内容：
+存在受信本地浏览器自动化环境时，优先使用本流程完成会话续期。本流程适用于 `.env` 已配置 `BH_TADPOLES_UID` 的场景（该值是账号级标识，不过期）；首次获取 UID 仍需走下方的手动回退流程，续期过程中家长不需要打开 DevTools 或复制任何内容：
 
 1. 用专用 user-data-dir 启动附带远程调试端口的可见 Chrome，打开 [Family Information Center](https://familyinfocenter.brighthorizons.com/)，由家长本人在窗口内完成登录与 MFA。端口与 profile 路径属本地配置，不入公开文档。
 2. 家长从孩子卡片进入 My Bright Day（`…/dashboard/parents.html?dependent_id=…`）。两个易错点：该页面空闲态不会发出 `/remote/v1/events` 请求；也不要直接导航 `mybrightday.brighthorizons.com` 根路径，会落到仅接受员工凭证的登录入口。对已打开的页面刷新一次即可稳定触发。

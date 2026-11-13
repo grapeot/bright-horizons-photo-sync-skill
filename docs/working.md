@@ -4,9 +4,9 @@
 
 ### 2026-11-13
 
-- 完成一次三个月跨度的增量同步与相册导入：区间发现 884 个事件，去重后实际新增下载 751 个媒体对象（外加 fix-formats 阶段元数据修正），photos-import 751/751 成功、0 错误；重复运行幂等（0 新导入），verify --deep 通过。PRD/RFC/测试策略未改动，`.env` 凭证契约保持不变。
-- 认证文档同步修订（skill、README、`docs/authentication.md`）：新增受信浏览器辅助提取路径为首选，手动 DevTools 流程降级为回退。关键实测结论：dashboard 空闲态不发 events 请求；直接导航 My Bright Day 根路径会落到员工凭证登录入口；自动化客户端看不到 legacy 接口的 Cookie 请求头，可靠的来源是浏览器 cookie jar 中 My Bright Day 域的会话 cookie；`BH_TADPOLES_UID` 为账号级固定标识可跨会话复用；Cookie 会话经验有效期约 3 个月。
-- 新增「增量与去重语义」说明：`attachment_count` 是附件引用数，同一媒体对象跨事件复用并按 ID 去重；完成度以 `downloaded`/`failed` 归零和 verify 结果为准，而非引用数。
+- 完成一次跨多月的增量同步与既有相册导入，全链路深度校验与导入幂等复验通过。PRD/RFC/测试策略未改动，`.env` 凭证契约保持不变；本轮实际备份统计留在本地运行报告，不入公开文档。
+- 认证文档同步修订（skill、README、`docs/authentication.md`）：新增受信浏览器辅助提取路径为首选（适用于已配置 UID 的会话续期，首次获取 UID 仍走手动回退），手动 DevTools 流程降级为回退。关键实测结论：dashboard 空闲态不发 events 请求；直接导航 My Bright Day 根路径会落到员工凭证登录入口；自动化客户端看不到 legacy 接口的 Cookie 请求头，可靠的来源是浏览器 cookie jar 中 My Bright Day 域的会话 cookie；`BH_TADPOLES_UID` 为账号级固定标识可跨会话复用；Cookie 会话经验有效期约 3 个月。
+- 新增「增量与去重语义」说明：`attachment_count` 是发现完成后数据库范围内已去重的附件对象总数，而非本次区间的引用数；完成度以幂等复跑 `downloaded`/`failed` 归零加上 verify 结果为准，`downloaded` 本身只代表本轮下载量。
 
 ### 2026-07-20
 
@@ -34,4 +34,4 @@
 - 公开的文档应该着眼于描述可重复执行的功能契约，禁止包含任何具体的家庭统计数据、姓名、日期、本地绝对路径或私有运行日志。
 - 受信浏览器辅助提取时不要在请求头里找 Cookie：legacy 系接口在任何自动化客户端侧都不暴露 Cookie 请求头；浏览器 cookie jar 才是可靠来源，按目标域拼接即可。
 - 单页应用的仪表页处于空闲态不会发数据接口请求；直接导航应用根路径可能落到错误身份（员工）的登录入口。刷新已打开的应用页面是稳定的触发方式。
-- 附件计数是跨事件复用的引用数，媒体对象按 ID 去重后实际新下载数量可能小一个数量级；判断完成度要看 `downloaded`/`failed` 归零与 verify 结果，而不是发现阶段的计数。
+- 发现报告的附件计数是数据库范围内已去重的对象总数，不是本次区间的附件引用数；区间引用可能落在既有对象、跨事件复用对象或 legacy 已迁移对象上，实际新下载数量因此通常远小于该计数。判断完成度要看幂等复跑 `downloaded`/`failed` 归零与 verify 结果，`downloaded` 本身只代表本轮下载量。
